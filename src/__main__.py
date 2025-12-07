@@ -20,7 +20,7 @@ PATH_TO_DATA = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 
 # Settings for history of llm chat
 SIZE_FOR_GENERATE = 100
-TEST_HISTORY_FROM_FILE = False
+TEST_HISTORY_FROM_FILE = True
 TRAIN_HISTORY_FROM_FILE = True
 
 TRAIN_FILE = "train_history_100.json"
@@ -62,13 +62,16 @@ def get_predict_models_for_agent(
         prompt: str,
         model: Agent,
         embeddings,
-        train_history,
-        train_score
+        questions,
+        answers,
+        train_score,
+        test_questions
 ) -> list:
     return [
         PromptAngleRegressorAdvanced.get_and_fit(
             prompt=prompt,
-            answers=train_history,
+            answers=answers,
+            questions=questions,
             scores=train_score,
             answer_subspace_dim=10
         ),
@@ -78,6 +81,7 @@ def get_predict_models_for_agent(
         # ),
         EmbeddingRegressor.get_and_fit(
             embedding=lambda docs: embeddings.embed_documents(docs),
+            questions=test_questions,
             prompt=prompt,
         )
     ]
@@ -121,9 +125,9 @@ if __name__ == "__main__":
         model=model
     )
 
-    actors = [
-        AnalyticsPrompt,
-        FinancePrompt,
+    dialogues = [
+        (FinancePrompt, AnalyticsPrompt),
+        (AnalyticsPrompt, FinancePrompt),
     ]
 
     result = {}
@@ -131,17 +135,22 @@ if __name__ == "__main__":
         lambda prompt, response: embedding_metrics(prompt, response, embeddings),
         bad_guy
     )
-    for actor in actors:
+    for question, answers in dialogues:
         predict_models = get_predict_models_for_agent(
-            actor.system,
-            validator,
-            embedding_ollama,
-            train_history.messages_by_author(actor.name),
-            train_history.scores_by_author(actor.name)
+            prompt=answers.system,
+            model=validator,
+            embeddings=embedding_ollama,
+            questions=train_history.messages_by_author(question.name),
+            answers=train_history.messages_by_author(answers.name),
+            train_score=train_history.normalize_scores_by_author(answers.name),
+            test_questions=test_history.messages_by_author(question.name)
         )
 
-        actor_answers = test_history.messages_by_author(actor.name)
-        result[actor.name] = {model.name: {"Predict scores": list(zip(model.predict(actor_answers), actor_answers))} for model in predict_models}
+        actor_answers = test_history.messages_by_author(answers.name)
+        result[answers.name] = {
+            model.name: {"Predict scores": list(zip(model.predict(actor_answers), actor_answers))}
+            for model in predict_models
+        }
 
     json_result = json.dumps(result, indent=2, cls=NumpyArrayEncoder, ensure_ascii=False)
     save_to_file(lambda file: file.write(json_result), f"../results.json")

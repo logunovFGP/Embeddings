@@ -19,15 +19,18 @@ class EmbeddingRegressor:
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap
         )
-        self.emb_prompt = np.array([])
+        self.embs = np.array([])
 
     def _get_embedding(self, content):
         split = self.splitter.split_text(content)
         embedding = self.embedding(split)
         return np.array(embedding)
 
-    def fit(self, prompt):
-        self.emb_prompt = self._get_embedding(prompt)
+    def fit(self, questions, prompt):
+        print("Fitting embedding regressor")
+
+        emb_prompt = self._get_embedding(prompt)
+        self.embs = [self._get_embedding(question) for question in questions]
         return self
 
     def predict(self, answers: list) -> np.ndarray:
@@ -35,14 +38,17 @@ class EmbeddingRegressor:
         for i in range(len(answers)):
             print(f"{self.name}: Proccessing answer {i} of {len(answers)}")
             answer = answers[i]
+
+            emb_question = self.embs[i]
             emb_answer = self._get_embedding(answer)
-            cos_sim = cosine_similarity(self.emb_prompt, emb_answer).mean(axis=0)[0]
+
+            cos_sim = cosine_similarity(emb_question, emb_answer).mean(axis=0)[0]
             result.append(cos_sim)
 
         return np.array(result)
 
     @staticmethod
-    def get_and_fit(embedding: Callable[[list[str]], list], prompt: str):
+    def get_and_fit(embedding: Callable[[list[str]], list], questions: list, prompt: str):
         model = EmbeddingRegressor(embedding=embedding)
-        model.fit(prompt)
+        model.fit(questions, prompt)
         return model

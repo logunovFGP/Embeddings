@@ -228,14 +228,16 @@ class PromptAngleRegressorAdvanced(BaseEstimator, RegressorMixin, TransformerMix
     # -------------------------
     # Fit: build TF-IDF, global SVD, prompt subspace, train ridge
     # -------------------------
-    def fit(self, answers: List[str], scores: List[float]):
+    def fit(self, question: List[str], answers: List[str], scores: List[float]):
         """
         answers: list of answer strings (training set)
         scores: numeric list (one score per answer)
         """
+        print("Fitting prompt regressor")
+
         # TF-IDF fit on prompt + answers
         self.tfidf_ = TfidfVectorizer(lowercase=True, stop_words=[self.stop_words])
-        corpus = [self.prompt] + list(answers)
+        corpus = [self.prompt] + answers + question
         self.tfidf_.fit(corpus)
 
         self.garbage_detector = GarbageDetector(self.tfidf_)
@@ -252,17 +254,21 @@ class PromptAngleRegressorAdvanced(BaseEstimator, RegressorMixin, TransformerMix
 
         # Build feature matrix for all training answers
         feature_rows = []
-        for ans in answers:
+        for question, ans in zip(question, answers):
             tf = self.tfidf_.transform([ans])
-            emb = self.svd_.transform(tf)[0]
-            U_ans = self._make_local_subspace(emb, k=self.answer_subspace_dim)
-            sigma, feat_dict = self._angle_and_spectral_features(self.U_prompt_, U_ans)
+            a_emb = self.svd_.transform(tf)[0]
+            q_emb = self.svd_.transform(self.tfidf_.transform([question]))[0]
+
+            U_ans = self._make_local_subspace(a_emb, k=self.answer_subspace_dim)
+            U_question = self._make_local_subspace(q_emb, k=self.answer_subspace_dim)
+
+            sigma, feat_dict = self._angle_and_spectral_features(U_question, U_ans)
             # record angle feature names on first iteration for ordering
             if not self.angle_feature_names_:
                 self.angle_feature_names_ = list(feat_dict.keys())
             # arrange feature vector: [embedding coords..., angle_feats in recorded order]
             angle_vector = np.array([feat_dict[k] for k in self.angle_feature_names_], dtype=float)
-            row = np.concatenate([emb, angle_vector])
+            row = np.concatenate([a_emb, angle_vector])
             feature_rows.append(row)
 
         X = np.vstack(feature_rows) if feature_rows else np.zeros(
@@ -365,6 +371,7 @@ class PromptAngleRegressorAdvanced(BaseEstimator, RegressorMixin, TransformerMix
     def get_and_fit(
             prompt: str,
             answers: List[str],
+            questions: List[str],
             scores: List[float],
             n_components: int = 100,
             answer_subspace_dim: int = 1,
@@ -382,6 +389,6 @@ class PromptAngleRegressorAdvanced(BaseEstimator, RegressorMixin, TransformerMix
             random_state=random_state,
             garbage_penalty=garbage_penalty,
         )
-        model.fit(answers, scores)
+        model.fit(questions, answers, scores)
 
         return model
